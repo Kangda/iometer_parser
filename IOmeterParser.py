@@ -201,20 +201,6 @@ def main():
     print_benchmark(files, "MBps (Binary)")
     print "***********LATENCY**********"
     print_benchmark(files, "Average Response Time")
-    
-
-    #with open("/home/kangda/Documents/Lab/Test/result", "w") as f:
-    #    for item in list:
-    #        test = TestFile(item)
-    #        test.parse(f);
-    #        files.append(test)
-    #plist.sort()
-    #for path in plist:
-    #    print path
-        #test = TestFile(path)
-        #test.init()
-        #test.parse()
-        #files.append(test)
 
 if __name__ == '__main__':
     main()
