@@ -197,7 +197,7 @@ def main():
         files.append(test)
     print "************IOPS************"
     print_benchmark(files, "IOps")
-    print "************MBPS************"
+    print "**********BANDWIDTH*********"
     print_benchmark(files, "MBps (Binary)")
     print "***********LATENCY**********"
     print_benchmark(files, "Average Response Time")
