@@ -5,60 +5,122 @@ import os
 import sys
 
 spaces = ["5G", "10G", "20G", "40G", "80G", "160G", "320G"]
-size = ["512B", "1KB", "2KB", "4KB", "8KB", "16KB", "32KB", "64KB", "128KB", \
+size = ["512B", "1KB", "2KB", "4KB", "8KB", "16KB", "32KB", "64KB", "128KB",
         "256KB", "512KB", "1MB", "2MB", "4MB", "8MB", "16MB", "32MB", "64MB"]
 interval = 3
 
-specs = ["4K", "8K", "16K", "32K", "64K", "128K", "256K", "512K", "1MB", "2MB", "4MB", "8MB", "16MB", "32MB", "64MB"]
+# specs = ["4KB_RR", "8KB_RR", "16KB_RR", "32KB_RR", "64KB_RR", "128KB_RR", "256KB_RR",
+#         "512KB_RR", "1MB_RR", "2MB_RR", "4MB_RR", "8MB_RR", "16MB_RR", "32MB_RR", "64MB_RR"]
+specs = [
+    "4KB_RR,16KB_RR", "4KB_RR,64KB_RR", "4KB_RR,256KB_RR", "4KB_RR,1MB_RR",
+    "4KB_RR,4MB_RR", "4KB_RR,16MB_RR", "16KB_RR,64KB_RR", "16KB_RR,256KB_RR",
+    "16KB_RR,1MB_RR", "16KB_RR,4MB_RR", "16KB_RR,16MB_RR", "64KB_RR,256KB_RR",
+    "64KB_RR,1MB_RR", "64KB_RR,4MB_RR", "64KB_RR,16MB_RR", "256KB_RR,1MB_RR",
+    "256KB_RR,4MB_RR", "256KB_RR,16MB_RR", "1MB_RR,4MB_RR", "1MB_RR,16MB_RR",
+    "4MB_RR,64MB_RR"]
 managers = ["vm1", "vm2"]
+
+
+class EndOfSpec(Exception):
+    def __init__(self):
+        Exception.__init__(self)
+
 
 class EndOfTestException(Exception):
     def __init__(self):
         Exception.__init__(self)
+
 
 class ParseException(Exception):
     def __init__(self, detail):
         Exception.__init__(self)
         self.detail = detail
 
+
 class Spec():
     def __init__(self):
         self.name = ""
         self.values = []
+        self.default_assignment = ""
 
     def handler(self, f):
         line = f.readline()
+
+        if line.startswith("'End access specifications"):
+            raise EndOfSpec()
+
+        if not line.startswith("'Access specification name"):
+            raise ParseException("Expect Spec Name but get %s" % line)
+
+        line = f.readline()
+        vals = line.split(",")
+        self.name = vals[0]
+        self.default_assignment = vals[1]
+
+        f.readline()  # Read the attr name line
+        line = f.readline()
         self.values = line.split(",")
-        self.name = self.values[0]
 
         return f
 
+
 class TestSpec():
-    
+
     def __init__(self):
-        self.name       = ""
-        self.spec_name  = ["size", "case_rate", "read_rate", "random_rate", "delay", "burst", "align", "replay"]
-        self.specs      = []
-        self.spec_num   = 0
+        self.name = ""
+        self.spec_name = ["size", "case_rate", "read_rate",
+                          "random_rate", "delay", "burst", "align", "replay"]
+        self.specs = []
+        self.spec_num = 0
+        self.spec_str = ""
+
+    def get_spec_str(self):
+
+        if self.spec_num == 0:
+            return ""
+
+        strs = []
+        for spec in self.specs:
+            li = spec.name.split(" ", 2)
+            s = li[0] + "_"
+
+            if li[1] == "random":
+                s += "R"
+            else:
+                s += "S"
+
+            if li[2] == "read":
+                s += "R"
+            else:
+                s += "W"
+
+            strs.append(s)
+
+        return ",".join(s for s in strs)
 
     def get_spec(self, f):
         line = f.readline()
-        if not line.startswith("'Access specification name"):
-            raise ParseException("Expect Spec Name but get %s" % line)
-        
-        self.spec_num += 1
-        while True:
-            spec = Spec()
-            f = spec.handler(f)
-            self.specs.append(spec)
-            
-            line = f.readline()
-            if line.lstrip("'").startswith("End access specifications"):
-                break
-            else:
-                self.spec_num += 1
 
+        if line.startswith("'End Test"):
+            raise EndOfTestException()
+
+        if not line.startswith("'Access specification"):
+            raise ParseException("Expect Spec start but get %s" % line)
+
+        while True:
+            self.spec_num += 1
+            try:
+                spec = Spec()
+                f = spec.handler(f)
+                self.specs.append(spec)
+
+            except EndOfSpec:
+                break
+
+        # print self.get_spec_str()
+        self.spec_str = self.get_spec_str()
         return f
+
 
 class Manager():
 
@@ -73,15 +135,16 @@ class Manager():
         if not line.startswith("MANAGER"):
             raise ParseException("Except start of manager but get %s" % line)
         self.values = line.split(",")
+        self.name = self.values[1]
         self.worker_num = int(self.values[4].rstrip("\r\n"))
         self.disk_num = int(self.values[5].rstrip("\r\n"))
-        
-        #pass the processor info
+
+        # pass the processor info
         while True:
             if not f.readline().startswith("PROCESSOR"):
                 break
 
-        #pass the worker and disk info
+        # pass the worker and disk info
         for i in range(0, self.worker_num + self.disk_num - 1):
             line = f.readline()
 
@@ -90,27 +153,28 @@ class Manager():
 
 class TestResult():
     def __init__(self):
-        self.attr_name = ["Target Type", "Target Name", "Access Specification Name",\
-                "Managers", "Workers", "Disks", "IOps", "Read IOps", "Write IOps", \
-                "MBps (Binary)", "Read MBps (Binary)", "Write MBps (Binary)", \
-                "MBps (Decimal)", "Read MBps (Decimal)", "Write MBps (Decimal)", \
-                "Transactions per Second", "Connections per Second", \
-                "Average Response Time", "Average Read Response Time", \
-                "Average Write Response Time", "Average Transaction Time", \
-                "Average Connection Time", "Maximum Response Time", \
-                "Maximum Read Response Time", "Maximum Write Response Time", \
-                "Maximum Transaction Time", "Maximum Connection Time", "Errors", \
-                "Read Errors", "Write Errors", "Bytes Read", "Bytes Written", \
-                "Read I/Os", "Write I/Os", "Connections", "Transactions per Connection", \
-                "Total Raw Read Response Time", "Total Raw Write Response Time", \
-                "Total Raw Transaction Time", "Total Raw Connection Time", \
-                "Maximum Raw Read Response Time", "Maximum Raw Write Response Time", \
-                "Maximum Raw Transaction Time", "Maximum Raw Connection Time", \
-                "Total Raw Run Time", "Starting Sector", "Maximum Size", "Queue Depth", \
-                "% CPU Utilization", "% User Time", "% Privileged Time", "% DPC Time", \
-                "% Interrupt Time", "Processor Speed", "Interrupts per Second", \
-                "CPU Effectiveness", "Packets/Second", "Packet Errors", \
-                "Segments Retransmitted/Second"]
+        self.attr_name = [
+            "Target Type", "Target Name", "Access Specification Name",
+            "Managers", "Workers", "Disks", "IOps", "Read IOps", "Write IOps",
+            "MBps (Binary)", "Read MBps (Binary)", "Write MBps (Binary)",
+            "MBps (Decimal)", "Read MBps (Decimal)", "Write MBps (Decimal)",
+            "Transactions per Second", "Connections per Second",
+            "Average Response Time", "Average Read Response Time",
+            "Average Write Response Time", "Average Transaction Time",
+            "Average Connection Time", "Maximum Response Time",
+            "Maximum Read Response Time", "Maximum Write Response Time",
+            "Maximum Transaction Time", "Maximum Connection Time", "Errors",
+            "Read Errors", "Write Errors", "Bytes Read", "Bytes Written",
+            "Read I/Os", "Write I/Os", "Connections", "Transactions per Connection",
+            "Total Raw Read Response Time", "Total Raw Write Response Time",
+            "Total Raw Transaction Time", "Total Raw Connection Time",
+            "Maximum Raw Read Response Time", "Maximum Raw Write Response Time",
+            "Maximum Raw Transaction Time", "Maximum Raw Connection Time",
+            "Total Raw Run Time", "Starting Sector", "Maximum Size", "Queue Depth",
+            "% CPU Utilization", "% User Time", "% Privileged Time", "% DPC Time",
+            "% Interrupt Time", "Processor Speed", "Interrupts per Second",
+            "CPU Effectiveness", "Packets/Second", "Packet Errors",
+            "Segments Retransmitted/Second"]
         self.attrs = {}
         self.mgr_num = 1
         self.managers = []
@@ -119,11 +183,11 @@ class TestResult():
         line = f.readline()
         if not line.startswith("'Results"):
             raise ParseException("Expect start of result but get %s" % line)
-        f.readline() #read the attr name
+        f.readline()  # read the attr name
         line = f.readline()
         values = line.split(",")
         self.attrs = dict(zip(self.attr_name, values))
-        
+
         return f
 
     def get_result(self, f):
@@ -136,19 +200,22 @@ class TestResult():
 
         return f
 
-    def get_manager(self, idx):
-        if len(self.managers) < (idx + 1):
-            return None
+    def get_manager(self, name):
 
-        return dict(zip(self.attr_name, self.managers[idx].values))
+        m = None
+        for mgr in self.managers:
+            if mgr.name == name:
+                m = mgr
+                break
+        return dict(zip(self.attr_name, m.values))
 
 
 class TestCase():
 
     def __init__(self):
-        #self.path       = path
-        self.spec       = TestSpec()
-        self.result     = TestResult()
+        # self.path       = path
+        self.spec = TestSpec()
+        self.result = TestResult()
 
     def get_start(self, f):
 
@@ -156,16 +223,18 @@ class TestCase():
             line = f.readline()
             if line.startswith("'"):
                 line = line.lstrip("'")
-            if line.startswith("Access specifications"):
-                break;
-            elif line.startswith("End Test"):
-                raise EndOfTestException()
+            if line.startswith("Time Stamp"):
+                f.readline()
+                break
 
         return f
 
     def get_spec(self, f):
-        
+
         return self.spec.get_spec(f)
+
+    def get_spec_str(self):
+        return self.spec.spec_str
 
     def get_result(self, f):
 
@@ -182,11 +251,11 @@ class TestFile():
     Container of TestCase.
     """
     def __init__(self, path):
-        self.path       = path
-        self.name       = os.path.basename(path)
-        self.fhandler   = None
-        self.testcases  = []
-    
+        self.path = path
+        self.name = os.path.basename(path)
+        self.fhandler = None
+        self.testcases = []
+
     def init(self):
         self.fhandler = open(self.path, "r")
 
@@ -199,13 +268,21 @@ class TestFile():
                 self.fhandler = test.get_spec(self.fhandler)
                 self.fhandler = test.get_result(self.fhandler)
                 self.testcases.append(test)
-                #test.print_case(f)
+                # test.print_case(f)
         except EndOfTestException:
             pass
         except EOFError:
             pass
         finally:
             self.fhandler.close()
+
+    def get_case(self, spec):
+        # print spec
+        for case in self.testcases:
+            if case.get_spec_str() == spec:
+                return case
+
+        return None
 
 
 def get_testcase_list(base_dir):
@@ -221,20 +298,22 @@ def get_testcase_list(base_dir):
 
     return entry_list
 
+
 def print_title1():
-    
+
     print "\t",
     for item in spaces:
         print item + "\t",
     print ""
 
+
 def print_benchmark1(files, attr):
-    
+
     print_title1()
     k = 0
     for s in size:
         print s + "\t",
-        
+
         for sp in spaces:
             p = 0
             for f in files:
@@ -242,39 +321,45 @@ def print_benchmark1(files, attr):
                     break
                 else:
                     p = p + 1
-        
+
             val = 0
             for i in range(0, interval):
-                val += float(files[p+i].testcases[k].result.attrs[attr].rstrip("\r\n"))
+                val += float(files[p + i].testcases[
+                             k].result.attrs[attr].rstrip("\r\n"))
 
-            print "%.3f\t" % (val/interval),
-        print ""#print \n
+            print "%.3f\t" % (val / interval),
+        print ""  # print \n
         k += 1
 
+
 def print_title2():
-    
-    print "\t",
+
+    print "\t\t",
     for item in managers:
         print item + "\t",
     print ""
 
+
 def print_benchmark2(files, attr):
-    
+
     print_title2()
     for sidx, sp in enumerate(specs):
-        print sp + "\t",
+        print sp + "\t\t",
 
         for midx, mgr in enumerate(managers):
 
             val = .0
             for fidx, f in enumerate(files):
-                val += float(f.testcases[sidx].result.get_manager(midx)[attr].rstrip("\r\n"))
-            print "%.2f\t" % (val/len(files)),
+                # print sp
+                val += float(f.get_case(sp).result.get_manager(
+                    mgr)[attr].rstrip("\r\n"))
+            print "%.2f\t" % (val / len(files)),
         print ""
+
 
 def main():
 
-    plist = get_testcase_list('/home/kangda/Documents/Lab/Test2')
+    plist = get_testcase_list('/home/kangda/Documents/Lab/Test3')
     plist.sort()
     files = []
     for path in plist:
@@ -288,13 +373,13 @@ def main():
         files.append(test)
 
     print "************IOPS************"
-    #print_benchmark1(files, "IOps")
+    # print_benchmark1(files, "IOps")
     print_benchmark2(files, "IOps")
     print "**********BANDWIDTH*********"
-    #print_benchmark1(files, "MBps (Binary)")
+    # print_benchmark1(files, "MBps (Binary)")
     print_benchmark2(files, "MBps (Binary)")
     print "***********LATENCY**********"
-    #print_benchmark1(files, "Average Response Time")
+    # print_benchmark1(files, "Average Response Time")
     print_benchmark2(files, "Average Response Time")
 
 if __name__ == '__main__':
